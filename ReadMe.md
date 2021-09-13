@@ -109,6 +109,110 @@ app.listen(APP_PORT,()=>{
 })
 ```
 
+# 四. 添加路由
+
+路由：根据不同的url，调用相应的处理函数
+
+## 1 安装koa-router
+
+```js
+npm i koa-router
+```
+
+步骤：
+
+1. 导入包
+2. 实例化对象
+3. 编写路由
+4. 注册中间件
+
+## 2 编写路由
+
+创建src/router目录，编写user.route.js
+
+```js
+const Router = require('koa-router')
+
+const router = new Router({
+    prefix: '/users'
+})
+
+// Get /user/
+router.get('/', (ctx, next) => {
+    ctx.body = 'hello users'
+})
+
+module.exports = router
+```
+
+## 3改写main.js
+
+```js
+const userRouter = require('./router/user.route')
+
+app.use(userRouter.routes())
+```
+
+# 五. 目录结构优化
+
+## 1 将http服务和app业务拆分
+
+创建src/app/index.js
+
+```js
+const Koa = require('koa')
+const userRouter = require('../router/user.route')
+
+const app = new Koa()
+app.use(userRouter.routes())
+module.exports = app
+```
+
+## 2 将路由和控制器拆分
+
+路由：解析URL，并将URL和对应的控制器一一对应
+
+控制器：处理不同的业务
+
+改写user.route.js
+
+```js
+const Router = require('koa-router')
+const {
+    register,
+    login
+} = require('../controller/user.controller')
+
+const router = new Router({
+    prefix: '/users'
+})
+
+// Get /user/  注册接口
+router.post('/register', register)
+router.post('/login', login)
+
+module.exports = router
+```
+
+创建controller/user.controller.js
+
+```js
+class UserController {
+    async register(ctx, next) {
+        ctx.body = '用户注册成功'
+    }
+    async login(ctx,next){
+        ctx.body = '用户登陆成功'
+    }
+}
+
+module.exports = new UserController()
+```
+
+
+
+
+
 
 
 
