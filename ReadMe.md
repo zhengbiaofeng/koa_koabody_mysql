@@ -281,7 +281,65 @@ class UserService {
 module.exports = new UserService()
 ```
 
+# 七.数据库操作
 
+通过sequelize ORM数据库工具（基于promise的Node.js的ORM）
+
+ORM：对象关系映射，面向对象的方式操作数据库
+
+- 数据表映射一个类
+- 数据表中的数据行对应一个对象
+- 数据库的操作映射成对象的方法
+- 数据表的字段映射成对象的属性
+
+## 1 安装sequelize
+
+```js
+npm i mysql2 sequelize
+```
+
+## 2 安装数据库
+
+src/db/seq.js
+
+```js
+const {
+    Sequelize
+} = require('sequelize')
+const {
+    MYSQL_HOST,
+    MYSQL_PORT,
+    MYSQL_USER,
+    MYSQL_PWD,
+    MYSQL_DB,
+} = require('../config/config.default')
+
+const seq = new Sequelize(MYSQL_DB, MYSQL_USER, MYSQL_PWD, {
+    host: MYSQL_HOST,
+    dialect: 'mysql'
+})
+
+seq.authenticate().then(() => {
+    console.log('数据库链接成功')
+}).catch((err) => {
+    console.log('数据库链接失败', err)
+})
+
+module.exports = seq
+```
+
+## 3 编写配置文件
+
+.env
+
+```js
+APP_PORT = 8000
+MYSQL_HOST = localhost
+MYSQL_PORT = 3306
+MYSQL_USER = root
+MYSQL_PWD = *******
+MYSQL_DB = zdsc
+```
 
 
 
