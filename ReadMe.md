@@ -341,9 +341,358 @@ MYSQL_PWD = *******
 MYSQL_DB = zdsc
 ```
 
+## 4 数据库中创建表
 
+创建zdsc数据库和zd_users:
 
+![image-20210914152904445](/Users/fengzhizi/Library/Application Support/typora-user-images/image-20210914152904445.png)
 
+表创建后，表格式和数据我们用代码自动插入。
+
+## 5 用代码强制写入数据
+
+拆分model层，新建src/model/user.model.js
+
+```js
+const {
+    DataTypes
+} = require('sequelize')
+const seq = require('../db/seq')
+
+// 创建模型 （Model zd_user -> zd_users）
+const User = seq.define('zd_user', {
+    // id 会被sequelize自动创建
+    user_name: {
+        type: DataTypes.STRING,
+        allowNull: false,
+        unique: true,
+        comment: '用户名，唯一'
+    },
+    password: {
+        type: DataTypes.CHAR(64),
+        allowNull: false,
+        comment: '密码'
+    },
+    is_admin: {
+        type: DataTypes.BOOLEAN,
+        allowNull: false,
+        defaultValue: 0,
+        comment: '是否为管理员，0不是管理员，1是'
+    }
+})
+
+// 模型同步，自动创建表,强制同步数据库
+// User.sync({
+//     force: true
+// })
+module.exports = User
+```
+
+表格式已经插入，通过ORM模型对应，接下来插入第一个用户数据，首先改写user.controller.js，用户注册成功会返回用户注册成功提示以及相应信息。
+
+```js
+const {
+    createUser
+} = require('../service/user.service')
+class UserController {
+    async register(ctx, next) {
+        // 1、获取数据
+        console.log(ctx.request.body)
+        const {
+            user_name,
+            password
+        } = ctx.request.body
+        // 2、操作数据库
+        const res = await createUser(user_name, password)
+        // 3、返回结果
+        ctx.body = {
+            code: 0,
+            message: '用户注册成功',
+            result: {
+                id: res.id,
+                user_name: res.user_name
+            }
+        }
+    }
+    async login(ctx, next) {
+        ctx.body = '用户登陆成功'
+    }
+}
+
+module.exports = new UserController()
+```
+
+改写src/service/user.service.js
+
+```js
+const User = require('../model/use.model')
+class UserService {
+    async createUser(user_name, password) {
+        // 插入数据
+        // await 表达式：promise对象成功的值
+        const res = await User.create({
+            user_name,
+            password
+        })
+        console.log(res)
+        return res.dataValues
+    }
+}
+module.exports = new UserService()
+```
+
+最后，用postman调用该接口，插入数据
+
+![image-20210914154539159](/Users/fengzhizi/Library/Application Support/typora-user-images/image-20210914154539159.png)
+
+# 八. 数据校验
+
+## 1 合法性和合理性
+
+我们上面的代码，只保证了用户如果传递正确数据会返回注册成功，那么如果传递了重复数据或者没有传递必传项，后端也需要传递相对应的代码给前台去提示。
+
+改写user.controller.js
+
+```js
+const {
+    createUser,getUserInfo
+} = require('../service/user.service')
+class UserController {
+    async register(ctx, next) {
+        // 1、获取数据
+        console.log(ctx.request.body)
+        const {
+            user_name,
+            password
+        } = ctx.request.body
+        // 合法性
+        if(!user_name || !password){
+            console.error('用户名或密码为空',ctx.request.body)
+            ctx.status = 400
+            ctx.body = {
+                code: '10001',
+                message:'用户名或者密码为空',
+                result:'',
+            }
+            return
+        }
+        // 合理性
+        if(getUserInfo({user_name})){
+            ctx.status = 409 // 表示冲突
+            ctx.body = {
+                code:'10002',
+                message:'用户已经存在',
+                result:''
+            }
+            return
+        }
+        // 2、操作数据库
+        const res = await createUser(user_name, password)
+        // 3、返回结果
+        ctx.body = {
+            code: 0,
+            message: '用户注册成功',
+            result: {
+                id: res.id,
+                user_name: res.user_name
+            }
+        }
+    }
+    async login(ctx, next) {
+        ctx.body = '用户登陆成功'
+    }
+}
+
+module.exports = new UserController()
+```
+
+改写user.service.js
+
+```js
+const User = require('../model/use.model')
+class UserService {
+    async createUser(user_name, password) {
+       // 同上...
+    }
+    async getUserInfo({id,user_name,password,is_admin}) {
+        const whereOpt = {}
+        id && Object.assign(whereOpt, {id})
+        user_name && Object.assign(whereOpt, {user_name})
+        password && Object.assign(whereOpt, {password})
+        is_admin && Object.assign(whereOpt, {is_admin})
+
+        const res = await User.findOne({
+            attributes:['id','user_name','password','is_admin'],
+            where:whereOpt
+        })
+        return res? res.dataValues: null
+    }
+}
+module.exports = new UserService()
+```
+
+## 2 抽取数据校验中间件
+
+use.controller.js是用来处理不同业务的，但是我们上面把数据校验写进去了，不符合我们的单一组件原则，因此我们做一个抽离，在一个地方统一规定数据校验的状态。
+
+创建user.middleware.js
+
+```js
+const {
+    getUserInfo
+} = require('../service/user.service')
+const userValidator = async (ctx, next) => {
+    const {
+        user_name,
+        password
+    } = ctx.request.body
+    if (!user_name || !password) {
+        console.error('用户名或密码为空', ctx.request.body)
+        ctx.status = 400
+        ctx.body = {
+            code: '10001',
+            message: '用户名或者密码为空',
+            result: '',
+        }
+        return
+    }
+    await next()
+}
+const verifyUser = async (ctx, next) => {
+    const {
+        user_name,
+        password
+    } = ctx.request.body
+    // 合理性
+    if (await getUserInfo({
+            user_name
+        })) {
+        ctx.status = 409 // 表示冲突
+        ctx.body = {
+            code: '10002',
+            message: '用户已经存在',
+            result: ''
+        }
+        return
+    }
+    await next()
+}
+module.exports = {
+    userValidator,
+    verifyUser
+}
+```
+
+改写user.controller.js
+
+```js
+const {
+    createUser,getUserInfo
+} = require('../service/user.service')
+class UserController {
+    async register(ctx, next) {
+        // 1、获取数据
+        console.log(ctx.request.body)
+        const {
+            user_name,
+            password
+        } = ctx.request.body
+       
+        // 2、操作数据库
+        const res = await createUser(user_name, password)
+        // 3、返回结果
+        ctx.body = {
+            code: 0,
+            message: '用户注册成功',
+            result: {
+                id: res.id,
+                user_name: res.user_name
+            }
+        }
+    }
+    async login(ctx, next) {
+        ctx.body = '用户登陆成功'
+    }
+}
+
+module.exports = new UserController()
+```
+
+改写user.route.js，用户匹配到register路径时，会先经过两个校验器，验证合格才会进入控制器进行业务操作。
+
+```js
+const Router = require('koa-router')
+const {userValidator, verifyUser} = require('../middleware/user.middleware')
+const {
+    register,
+    login
+} = require('../controller/user.controller')
+
+const router = new Router({
+    prefix: '/users'
+})
+
+// Get /user/  注册接口
+router.post('/register', userValidator, verifyUser, register)
+router.post('/login', login)
+
+module.exports = router
+```
+
+## 3 统一抽取报错代码
+
+错误类型是通用的，我们尽量把他们统一在一个单独的定义文件里。创建consitant/err.type.js
+
+```js
+module.exports = {
+    userFormateError: {
+        code: '10001',
+        message: '用户名或者密码为空',
+        result: '',
+    },
+    userAlreadyExited: {
+        code: '10002',
+        message: '用户已经存在',
+        result: ''
+    }
+}
+```
+
+创建app/errHandler.js
+
+```js
+module.exports = (err, ctx) => {
+    let status = 500
+    switch (err.code) {
+        case '10001':
+            status = 400
+            break
+        case '10002':
+            status = 409
+            break
+        default:
+            status = 500
+    }
+    ctx.status = status
+    ctx.body = err
+}
+```
+
+改写app/index.js
+
+```js
+const Koa = require('koa')
+const koaBody = require('koa-body')
+const errHandler = require('./errHandler')
+const userRouter = require('../router/user.route')
+
+const app = new Koa()
+app.use(koaBody())
+app.use(userRouter.routes())
+// 统一的错误处理,handler接收两个参数，一个error，一个ctx.handler后期也会非常庞大，因此单独抽离
+app.on('error', errHandler);
+module.exports = app
+```
 
 
 
