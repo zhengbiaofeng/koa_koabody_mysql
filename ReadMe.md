@@ -696,6 +696,193 @@ module.exports = app
 
 
 
+# 九. 加密
+
+将密码保存到数据库之前，要对密码进行加密
+
+## 1 安装bcryptjs
+
+```js
+npm i bcryptjs
+```
+
+## 2 拆分中间件
+
+改写user.middleware.js
+
+```js
+const bcrypt = require('bcryptjs')
+
+const bcryptPassword = async (ctx,next) =>{
+  const {password} = ctx.request.body
+  const slat = bcrypt.genSaltSync(10)
+  const hash = bcrypt.hashSync(password, slat)
+  ctx.request.body.password = hash
+  await next()
+}
+```
+
+## 3 在route中使用
+
+改写user.route.js
+
+```js
+router.post('/register', userValidator, verifyUser, cryptPassword, register)
+```
+
+# 十. 验证登陆
+
+用户登陆时，我们需要检验用户是否存在，密码是否正确。
+
+## 1 改写登陆接口
+
+改写user.route.js，在正式登陆前，判断是否为空（userValidator）,如果不为空，我们就要检验登陆的账号密码，写一个verifyLogin中间件
+
+```js
+router.post('/login', userValidator, verifyLogin, login)
+```
+
+## 2 检验账号密码
+
+`user.middleware.js`中新增verifyLogin函数，做账号密码校验
+
+```js
+const verifyLogin = async (ctx,next) =>{
+    // 1、判断用户是否存在（不存在：报错）
+    const {user_name,password} = ctx.request.body
+    try {
+        const res = await getUserInfo({user_name})
+        if(!res){
+            console.error('用户名不存在',{user_name})
+            ctx.app.emit('error',userDoesNotExist,ctx)
+            return
+        }
+        // 2、判断密码是否正确（不正确：报错）
+        if(!bcrypt.compareSync(password, res.password)){
+            ctx.app.emit('error',invalidPassword,ctx)
+            return
+        }
+    } catch (error) {
+        console.error(error)
+            ctx.app.emit('error',userLoginError,ctx)
+    }
+    await next()
+}
+```
+
+## 3 新增三个报错规定
+
+改写err.type.js
+
+```js
+ userDoesNotExist:{
+        code:'10004',
+        message:'用户不存在',
+        result:''
+    },
+    userLoginError:{
+        code:'10005',
+        message:'登陆错误',
+        result:''
+    },
+    invalidPassword:{
+        code:'10006',
+        message:'密码错误',
+        result:''
+    }
+```
+
+# 十一. 用户的认证
+
+用户登录后，给用户颁发一个令牌token，用户在以后的每一次请求中都要携带这个令牌。我们选择使用jwt来制作token。它包括三部分构成`header`，`payload`，`signature`。（简介请看https://www.jianshu.com/p/576dbf44b2ae这篇文章）
+
+## 1 颁发token
+
+- 安装jsonwebtoken
+
+```js
+npm i jsonwebtoken
+```
+
+- 在控制器中改写login方法
+
+```js
+async login(ctx, next) {
+        let {user_name} = ctx.request.body
+        // 1. 获取用户信息（要在token的payload中，记录id，user_name, is_admin）
+        try {
+            const {password, ...res} = await getUserInfo({user_name})
+            ctx.body = {
+                code: 0,
+                message: '用户登陆成功',
+                result: {
+                    token: jwt.sign(res, JWT_SECRET, {
+                        expiresIn: '1d'
+                    }),
+                }
+            }
+        } catch (error) {
+            console.error('用户登陆失败', error)
+        }
+    }
+```
+
+- 定义私钥
+
+```js
+JWT_SECRET = xzd
+```
+
+## 2 用户认证
+
+- 创建auth中间件
+
+```js
+// auth.middleware.js
+const jwt = require('jsonwebtoken')
+const {
+    JWT_SECRET
+} = require('../config/config.default')
+const {
+    tokenExpiredError,
+    invalidToken
+} = require('../constant/err.type')
+const auth = async (ctx, next) => {
+    const {
+        authorization
+    } = ctx.request.header
+    const token = authorization.replace('Bearer ', '')
+    try {
+        const user = jwt.verify(token, JWT_SECRET)
+        ctx.state.user = user
+    } catch (err) {
+        switch (err.name) {
+            case 'TokenExpiredError':
+                console.error('token 已经过期', err)
+                return ctx.app.emit('error', tokenExpiredError, ctx)
+            case 'JsonWebTokenError':
+                console.error('无效的token', err)
+                return ctx.app.emit('error', invalidToken, ctx)
+        }
+    }
+    await next()
+}
+
+module.exports = {
+    auth
+}
+```
+
+- 改写router
+
+```js
+// 修改密码接口
+router.patch('/', auth, (ctx, next) => {
+  console.log(ctx.state.user)
+  ctx.body = '修改密码成功'
+})
+```
+
 
 
 

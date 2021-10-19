@@ -26,7 +26,7 @@ const User = seq.define('zd_user', {
 })
 
 // 模型同步，自动创建表,强制同步数据库
-User.sync({
-    force: true
-})
+// User.sync({
+//     force: true
+// })
 module.exports = User
