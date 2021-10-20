@@ -883,6 +883,278 @@ router.patch('/', auth, (ctx, next) => {
 })
 ```
 
+# 十二. 修改密码
+
+用户登录成功后，我们可以让用户修改密码。
+
+```js
+router.patch('/', auth, cryptPassword, changePassword)
+```
+
+改写user.controller.js，增加changePassword函数
+
+```js
+ //修改密码接口
+    async changePassword (ctx, next) {
+        // 1.获取数据
+        const id = ctx.state.user.id
+        const password = ctx.request.body.password
+        console.log(id, password)
+        // 2.更新数据库
+        if (await updateById({ id, password })) {
+            ctx.body = {
+                code: 0,
+                message: '修改密码成功',
+                result: ''
+            }
+        } else {
+            ctx.body = {
+                code: '10007',
+                message:'修改密码失败',
+                result: ''
+            }
+        }
+        // 3.返回结果
+    }
+```
+
+三个步骤，获取数据，更新数据库，返回结果，单独抽取出去一个方法。改写user.service.js
+
+```js
+async updateById ({ id, user_name, password, is_admin }) {
+        const whereOpt = { id }
+        const newUser = {}
+        user_name && Object.assign(newUser, { user_name })
+        password && Object.assign(newUser, { password })
+        is_admin && Object.assign(newUser, { is_admin })
+
+        const res = await User.update(newUser, { where: whereOpt })
+        // res是一个数组，0或者1，0表示修改失败，1表示成功
+        console.log(res)
+        return res[0] > 0 ? true : false
+    }
+```
+
+# 十三. 路由自动加载
+
+登录相关接口写差不多啦，我们开始写商品图片上传的接口，
+
+## 1 增加`router/goods.route.js`
+
+```js
+const Router = require('koa-router')
+const {upload} = require('../controller/goods.controller')
+const router = new Router({prefix:'/goods'})
+
+router.post('/upload',upload)
+
+module.exports = router
+```
+
+##2 增加controller/goods.controller.js
+
+```js
+class GoodsController {
+    async upload(ctx,next){
+        ctx.body = '商品上传成功'
+    }
+}
+
+module.exports = new GoodsController()
+```
+
+##3 改写app/index.js，新增goodsRouter
+
+```js
+const goodsRouter = require('../router/goods.route')
+app.use(goodsRouter.routes())
+```
+
+这一步就已经完成，但是我们每增加一个模块的话，就要重复上面的步骤，是不太优秀的，可以用node的fs模块来实现自动加载路由
+
+##4 新增`router/index.js`
+
+```js
+const fs = require('fs')
+
+const Router = require('koa-router')
+const router = new Router()
+
+fs.readdirSync(__dirname).forEach(file =>{
+    console.log(file)
+    if(file !== 'index.js'){
+        let r = require('./' + file)
+        router.use(r.routes())
+    }
+})
+
+module.exports = router
+```
+
+##5 改写app/index.js
+
+```js
+// const userRouter = require('../router/user.route')
+// const goodsRouter = require('../router/goods.route')
+const router = require('../router')
+
+// app.use(userRouter.routes())
+// app.use(goodsRouter.routes())
+app.use(router.routes()).use(router.allowedMethods())
+
+```
+
+# 十四. 封装管理员权限
+
+并不是所有人都能上传图片，必须拥有管理员权限才可以，因此在上传图片接口，我们需要封装一个中间件来判断用户是否有权限
+
+## 1 新增授权函数
+
+```js
+// middleware/auth.middleware.js
+// 授权
+const hadAdminPermission = async (ctx, next) => {
+    console.log('ctx', ctx.state)
+    const { is_admin } = ctx.state.user
+    if (!is_admin) {
+        console.error('该用户没有管理员权限', ctx.state.user)
+        return ctx.app.emit('error', hasNotAdminPermission, ctx)
+    }
+    await next()
+}
+```
+
+## 2 新增权限错误代码
+
+```js
+// constant/err.type.js 
+hasNotAdminPermission: {
+        code: '10103',
+        message: '没有管理员权限',
+        result: ''
+    }
+```
+
+## 3 引入权限判断
+
+```js
+// router/goods.route.js
+router.post('/upload', auth, hadAdminPermission, upload)
+```
+
+这时候用admin登录，就可以啦
+
+# 十五. 商品图片上传
+
+前面的工作，接口已经调通，我们开始正式写一下这个接口。
+
+## 1 配置一下postman
+
+
+
+![截屏2021-10-20 下午1.07.45的副本](/Users/fengzhizi/Desktop/截屏2021-10-20 下午1.07.45的副本.png)
+
+## 2 改写goods.controller.js
+
+如果成功获取到上传的文件，那么将文件路径返回给前端。如果没有成功，发送一个错误
+
+```js
+const path = require('path')
+class GoodsController {
+    async upload (ctx, next) {
+        const { file } = ctx.request.files
+        if (file) {
+            ctx.body = {
+                code: 0,
+                message: '商品上传成功',
+                result: {
+                    goods_img: path.basename(file.path),
+                }
+            }
+        } else {
+            return ctx.app.emit('error', fileUploadError, ctx)
+        }
+    }
+}
+
+module.exports = new GoodsController()
+```
+
+## 3 定义错误
+
+```js
+// constant/err.type.js
+fileUploadError:{
+        code: '10201',
+        message: '商品图片上传失败',
+        result: ''
+    }
+unSupportedFileType: {
+        code: '10202',
+        message: '不支持的文件格式',
+        result: '',
+    },
+```
+
+## 4 定义静态资源储存文件
+
+src下新建upload文件，用来存放静态资源
+
+```js
+//app/index.js
+
+const koaBody = require('koa-body')
+const koaStatic = require('koa-static')
+
+app.use(koaBody({
+  multipart: true,
+  formidable: {
+    // 在配置选项option里，不推荐使用相对路径。
+    // 在option里的相对路径，不是相对当前文件，而是在koaBody里处理的，相对process.cwd(),也就是说脚本在哪里执行。他最后在app里面执行，因此容易出错
+    // uploadDir: '../upload'
+    uploadDir: path.join(__dirname, '../upload'),
+    keepExtensions: true
+  }
+}))
+
+app.use(koaStatic(path.join(__dirname, '../upload')))
+```
+
+## 5 优化类型判断
+
+我们可以规定用户可以上传什么类型的文件，如果没有按照规定传输，可以返回错误。
+
+```js
+// 改写controller/goods.controller.js
+
+const { unSupportedFileType } = require('../constant/err.type')
+const path = require('path')
+class GoodsController {
+    async upload (ctx, next) {
+        const { file } = ctx.request.files
+        const fileTypes = ['image/jpeg', 'image/png']
+        if (file) {
+            if (!fileTypes.includes(file.type)) {
+                return ctx.app.emit('error', unSupportedFileType, ctx)
+            }
+            ctx.body = {
+                code: 0,
+                message: '商品上传成功',
+                result: {
+                    goods_img: path.basename(file.path),
+                }
+            }
+        } else {
+            return ctx.app.emit('error', fileUploadError, ctx)
+        }
+    }
+}
+
+module.exports = new GoodsController()
+```
+
+至此，上传商品图片的接口可以使用啦。
+
 
 
 

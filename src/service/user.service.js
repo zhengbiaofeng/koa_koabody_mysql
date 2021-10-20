@@ -1,6 +1,6 @@
 const User = require('../model/use.model')
 class UserService {
-    async createUser(user_name, password) {
+    async createUser (user_name, password) {
         // 插入数据
         // await 表达式：promise对象成功的值
         const res = await User.create({
@@ -10,7 +10,7 @@ class UserService {
         console.log(res)
         return res.dataValues
     }
-    async getUserInfo({
+    async getUserInfo ({
         id,
         user_name,
         password,
@@ -36,32 +36,16 @@ class UserService {
         })
         return res ? res.dataValues : null
     }
-    async updateById({
-        id,
-        user_name,
-        password,
-        is_admin
-    }) {
-        const whereOpt = {
-            id
-        }
+    async updateById ({ id, user_name, password, is_admin }) {
+        const whereOpt = { id }
         const newUser = {}
-        user_name && Object.assign(newUser, {
-            user_name
-        })
-        password && Object.assign(newUser, {
-            password
-        })
-        is_admin && Object.assign(newUser, {
-            is_admin
-        })
+        user_name && Object.assign(newUser, { user_name })
+        password && Object.assign(newUser, { password })
+        is_admin && Object.assign(newUser, { is_admin })
 
-        const res = await User.update(newUser, {
-            where: whereOpt
-        })
-        console.log(res)
+        const res = await User.update(newUser, { where: whereOpt })
+        console.log('00000', res)
         return res[0] > 0 ? true : false
-
     }
 }
 module.exports = new UserService()
